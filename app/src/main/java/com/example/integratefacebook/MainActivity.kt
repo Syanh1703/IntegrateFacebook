@@ -12,8 +12,15 @@ import com.facebook.*
 import com.facebook.login.LoginManager
 import com.facebook.login.LoginResult
 import com.facebook.login.widget.LoginButton
+import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.auth.api.signin.GoogleSignInAccount
+import com.google.android.gms.auth.api.signin.GoogleSignInClient
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions
+import com.google.android.gms.common.SignInButton
+import com.google.android.gms.common.api.ApiException
 import com.google.firebase.auth.FacebookAuthProvider
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.GoogleAuthProvider
 import java.security.MessageDigest
 import java.security.NoSuchAlgorithmException
 
@@ -21,6 +28,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var firebaseAuth :FirebaseAuth
     private lateinit var callbackManager :CallbackManager
     private lateinit var btnLogInFB:LoginButton
+    private lateinit var btnLogInGG :SignInButton
+    private lateinit var ggClientSignIn :GoogleSignInClient
 
     private var fbId :String? = null
     private var fbName :String? = null
@@ -32,6 +41,8 @@ class MainActivity : AppCompatActivity() {
     companion object
     {
         const val ACTIVITY = "Main Activity"
+        const val GG_SIGN_IN_CODE = 1804
+
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -59,6 +70,22 @@ class MainActivity : AppCompatActivity() {
             signIn()
             LoginManager.getInstance().logInWithReadPermissions(this, listOf("public_profile", "email"))
         }
+
+        //Google Log In
+        btnLogInGG = findViewById(R.id.btnGoogleSignIn)
+        btnLogInGG.setSize(SignInButton.SIZE_STANDARD)
+
+        val googleSignInOptions = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+            .requestIdToken(getString(androidx.compose.ui.R.string.default_popup_window_title))
+            .requestEmail()
+            .build()
+        ggClientSignIn = GoogleSignIn.getClient(this, googleSignInOptions)
+        btnLogInGG.setOnClickListener {
+            Log.d(ACTIVITY, "Begin Google Sign In")
+            val intent = ggClientSignIn.signInIntent
+            startActivityForResult(intent, GG_SIGN_IN_CODE)
+        }
+        checkUser()
     }
     private fun printKeyHash()
     {
@@ -119,7 +146,25 @@ class MainActivity : AppCompatActivity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
 
+        //Facebook
         callbackManager.onActivityResult(requestCode, resultCode, data)
+
+        //Google
+        if(requestCode == GG_SIGN_IN_CODE)
+        {
+            Log.d(ACTIVITY,"Google Sign In intent result")
+            val accountTask = GoogleSignIn.getSignedInAccountFromIntent(data)
+            try {
+                //Google Sign In success
+                val ggAccount = accountTask.getResult(ApiException::class.java)
+                uploadGoogleAccToFirebase(ggAccount)
+            }
+            catch (e:Exception)
+            {
+                Log.d(ACTIVITY, "Login Failed: ${e.message}")
+                Toast.makeText(this, "Google Log In failed", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     @SuppressLint("LongLogTag")
@@ -238,5 +283,45 @@ class MainActivity : AppCompatActivity() {
     private fun userLogOut()
     {
         LoginManager.getInstance().logOut()
+    }
+
+    private fun uploadGoogleAccToFirebase(acc:GoogleSignInAccount?)
+    {
+        val credential = GoogleAuthProvider.getCredential(acc!!.idToken, null)
+        firebaseAuth.signInWithCredential(credential)
+            .addOnSuccessListener {
+                authResult ->
+                Toast.makeText(this, "Logged In", Toast.LENGTH_SHORT).show()
+                val ggFirebaseUser = firebaseAuth.currentUser
+                val userInfo = ggFirebaseUser!!.uid
+                val userEmail = ggFirebaseUser.email
+
+                Log.d(ACTIVITY, "User Info is: $userInfo")
+                Log.d(ACTIVITY, "User Email: $userEmail")
+
+                //Check if user new or existing
+                if(authResult.additionalUserInfo!!.isNewUser)
+                {
+                    Log.d(ACTIVITY, "User created \n $userEmail")
+                    Toast.makeText(this, "User created: $userEmail", Toast.LENGTH_SHORT).show()
+                }
+                else
+                {
+                    //Existed User
+                    Toast.makeText(this, "This user is already existed", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .addOnFailureListener { e ->
+                //Logged In failed
+                Log.d(ACTIVITY, "Logged In Failed: ${e.message}")
+                Toast.makeText(this, "Logged In failed", Toast.LENGTH_SHORT).show()
+            }
+        //Start Profile Activity
+        startActivity(Intent(this,GGProfileActivity::class.java))
+        finish()
+    }
+    private fun checkUser()
+    {
+
     }
 }
